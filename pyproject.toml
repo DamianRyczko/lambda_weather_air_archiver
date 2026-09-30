@@ -1,0 +1,27 @@
+[project]
+name = "lambda-weather-air-archiver"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "DamianRyczko", email = "damianryczko2003@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "boto3>=1.43.105",
+    "httpx>=0.28.1",
+]
+
+[project.scripts]
+lambda-weather-air-archiver = "lambda_weather_air_archiver:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "ruff>=0.16.9",
+]
