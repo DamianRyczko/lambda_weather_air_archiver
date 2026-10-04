@@ -8,8 +8,8 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "boto3>=1.43.105",
     "httpx>=0.28.1",
+    "tenacity>=9.1.4",
 ]
 
 [project.scripts]
@@ -21,7 +21,11 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "boto3>=1.43.105",
+    "boto3-stubs[s3]>=1.43.105",
+    "moto[s3]>=5.2.3",
     "mypy>=2.3.1",
     "pytest>=9.1.1",
+    "respx>=0.23.1",
     "ruff>=0.16.9",
 ]
