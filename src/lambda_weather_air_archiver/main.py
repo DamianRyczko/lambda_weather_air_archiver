@@ -1,9 +1,18 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, UTC
 from enum import StrEnum
 
+import botocore
 import httpx
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, NonNegativeInt, NonNegativeFloat
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    NonNegativeFloat,
+    NonNegativeInt,
+    JsonValue,
+)
 from tenacity import (
     before_sleep_log,
     retry,
@@ -11,15 +20,19 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
+import argparse
+import boto3
+from types_boto3_s3 import S3ServiceResource
 
 logger = logging.getLogger(__name__)
+s3 = boto3.resource('s3', region_name="eu-central-1")
 
 RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 
 GIOS_BASE_URL = "https://api.gios.gov.pl/pjp-api/v1/rest"
     
 GIOS_ALL_STATIONS = GIOS_BASE_URL+"/station/findAll"
-GIOS_MEASURING_STATIONS = GIOS_BASE_URL+"/station/sensors/" #{stationId}
+GIOS_SENSORS = GIOS_BASE_URL+"/station/sensors/" #{stationId}
 GIOS_SENSOR_DATA = GIOS_BASE_URL+"/data/getData/" #{sensorId}
 GIOS_AIR_QUALITY_INDEX =  GIOS_BASE_URL+"/aqindex/getIndex/" #{stationId}
 
@@ -30,9 +43,6 @@ IMGW_BASE_URL = "https://danepubliczne.imgw.pl/api/data"
 
 IMGW_SYNOPTIC_DATA = IMGW_BASE_URL+"/synop/id/" #eg. 12105 # more impoertnat one 
 IMGW_METEO_DATA = IMGW_BASE_URL+"/meteo/id/" # not the same as synop 
-
-CITY = "Wrocław"
-
 
 # ==================================== Enums =======================================
 class GiosFields(StrEnum):
@@ -108,22 +118,17 @@ class ImgwSynopFields(StrEnum):
     
 
 # ==================================== MODELS =======================================
-class GiosStation(BaseModel):
-    id : NonNegativeInt = Field(title="Station ID", validation_alias=GiosFields.ID)
-    station_code : str | None = Field(default=None, title="Station Code", min_length=3, validation_alias=GiosFields.CODE)
-    station_name : str | None = Field(default=None, title="Station Name", min_length=3, validation_alias=GiosFields.NAME)
-    city: str | None = Field(default=None, title="City", min_length=3,  validation_alias=GiosFields.CITY)
+class GiosSensorReading(BaseModel):
+    date : datetime = Field(title="Date", validation_alias=GiosSensorReadingFields.DATE)
+    value : float | None = Field(default=None, title="Sensor Reading", validation_alias=GiosSensorReadingFields.VALUE)
     
 class GiosSensor(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     id : NonNegativeInt = Field(title="Sensor ID", validation_alias=GiosSensorFields.INDICATOR_ID)
     indicator_name : str | None = Field(default=None, title="Indicator Name", validation_alias=GiosSensorFields.INDICATOR)
     indicator_code : str | None = Field(default=None, title="Indicator Code", validation_alias=GiosSensorFields.INDICATOR_CODE)
+    readings: list[GiosSensorReading] | None = Field(default=None, title="Station readings")
     
-class GiosSensorReading(BaseModel):
-    date : datetime = Field(title="Date", validation_alias=GiosSensorReadingFields.DATE)
-    value : float | None = Field(default=None, title="Sensor Reading", validation_alias=GiosSensorReadingFields.VALUE)
-
 class GiosAirIndex(BaseModel):
     pm_10_index_reading : NonNegativeInt | None = Field(title="PM 10 Index", validation_alias=GiosAirIndexFields.PM_10)
     pm_25_index_reading : NonNegativeInt | None = Field(title="PM 2.5 Index", validation_alias=GiosAirIndexFields.PM_25)
@@ -133,7 +138,20 @@ class GiosAirIndex(BaseModel):
     pm_25_index_reading_date : str | None = Field(title="PM 2.5 Index measument date", validation_alias=GiosAirIndexFields.PM_25_DATE)
     NO2_index_reading_date : str | None = Field(title="NO2 Index measument date", validation_alias=GiosAirIndexFields.NO2_DATE)
     O3_index_reading_date : str | None = Field(title="O3 Index measument date", validation_alias=GiosAirIndexFields.O3_DATE)
-
+    
+class GiosStation(BaseModel):
+    id : NonNegativeInt = Field(title="Station ID", validation_alias=GiosFields.ID)
+    station_code : str | None = Field(default=None, title="Station Code", min_length=3, validation_alias=GiosFields.CODE)
+    station_name : str | None = Field(default=None, title="Station Name", min_length=3, validation_alias=GiosFields.NAME)
+    city: str | None = Field(default=None, title="City", min_length=3,  validation_alias=GiosFields.CITY)
+    sensors: list[GiosSensor] | None = Field(default=None, title="Avialble sensors")
+    air_indexes: GiosAirIndex | None = Field(default=None, title="Air inedexes")
+    
+class GiosSnapshot(BaseModel):
+    source: str = "gios"
+    fetched_at: datetime
+    stations: list[GiosStation]
+    
 class ImgwSynopReading(BaseModel):
     date : datetime = Field(title="Date of measurment", validation_alias=ImgwSynopFields.READING_DATE)
     hour : str = Field(title="Hour of measurment", validation_alias=ImgwSynopFields.READING_HOUR)
@@ -158,7 +176,7 @@ class ImgwMeteoReading(BaseModel):
     air_temperature_date : datetime | None = Field(title="Date of measurment - air temperature", validation_alias=ImgwMeteoFields.AIR_TEMEPRATIRE_DATE)
     wind_direction_date : datetime | None = Field(title="Date of measurment - wind direction", validation_alias=ImgwMeteoFields.WIND_DIRECTION_DATE)
     wind_avg_speed_date : datetime | None = Field(title="Date of measurment - wind avg speed", validation_alias=ImgwMeteoFields.AVG_WIND_SPEED_DATE)
-    wind_max_speed_date : datetime | None = Field(title="Date of measurment - wubd max speed", validation_alias=ImgwMeteoFields.MAX_WIND_SPEED)
+    wind_max_speed_date : datetime | None = Field(title="Date of measurment - wubd max speed", validation_alias=ImgwMeteoFields.MAX_WIND_SPEED_DATE)
     relative_humidity_date : datetime | None = Field(title="Date of measurment - relative humdity", validation_alias=ImgwMeteoFields.RELATIVE_HUMIDITY_DATE)
     wind_max_speed_10min_date : datetime | None = Field(title="Date of measurment - wind max speed 10 min", validation_alias=ImgwMeteoFields.MAX_WIND_SPEED_10MIN_DATE)
     precipitation_10min_date : datetime | None = Field(title="Date of measurment - precipitation 10 min", validation_alias=ImgwMeteoFields.PRECIPITATION_10MIN_DATE)
@@ -166,8 +184,13 @@ class ImgwMeteoReading(BaseModel):
 class ImgwStation(BaseModel):
     id : NonNegativeInt = Field(title="Station ID", validation_alias=AliasChoices(ImgwMeteoFields.CODE, ImgwSynopFields.ID))
     station_name : str | None = Field(default=None, title="Station Name", min_length=3, validation_alias=AliasChoices(ImgwMeteoFields.NAME, ImgwSynopFields.NAME))
-
-
+    reading: ImgwMeteoReading | ImgwSynopReading | None = Field(default=None, title="Station data")
+    
+class ImgwSnapshot(BaseModel):
+    source: str = "imgw"
+    fetched_at: datetime
+    meteo_stations: list[ImgwStation]
+    synop_stations: list[ImgwStation]
 
 def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
@@ -175,6 +198,14 @@ def _is_retryable(exc: BaseException) -> bool:
     else:
         return isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError))
     
+def _save_to_json(data: ImgwSnapshot | GiosSnapshot, s3: S3ServiceResource = s3, bucket_path:str = "weather-air-data-885427126159-eu-north-1-an") -> None :
+    if data:
+        ts = data.fetched_at
+        filepath = f"{data.source}/date={ts:%Y-%m-%d}/{ts:%H-%M-%S}.json"
+        try:
+            s3.Bucket(bucket_path).put_object(Key=filepath, Body=data.model_dump_json(indent=2))
+        except botocore.exceptions.ClientError as e:
+            logger.error("Uploading json to aws s3 %s failed: %r", filepath, e)
 # ==================================== DECORATORS ===================================
 @retry(
     wait=wait_exponential_jitter(initial=1, max=10), 
@@ -199,10 +230,10 @@ def _get_with_error_handling(client: httpx.Client, url:str, params=None) -> http
     
     return response 
 # ==================================== CLASSES =======================================
-def get_gios_stations(client: httpx.Client, page_size: int = 20, city: str = CITY) -> list[GiosStation]:
+def get_gios_stations(city: str, client: httpx.Client, page_size: int = 20) -> list[GiosStation]:
     page_nr = 0
     total_pages = 1  # real value comes from the first response
-    stations_in_wroclaw : list[GiosStation] = []
+    stations : list[GiosStation] = []
     
     while page_nr < total_pages:
         response = _get_with_error_handling(client=client, url=GIOS_ALL_STATIONS, params={"page": page_nr, "size": page_size})
@@ -218,23 +249,23 @@ def get_gios_stations(client: httpx.Client, page_size: int = 20, city: str = CIT
                 city_name = station[GiosFields.CITY].lower()
                 if city_name == city.lower():
                     logger.debug('Found GIOS station %s in %s', station[GiosFields.CODE],  station[GiosFields.CITY])
-                    stations_in_wroclaw.append(GiosStation.model_validate(station))
+                    stations.append(GiosStation.model_validate(station))
             
         page_nr += 1
     if logger.isEnabledFor(logging.DEBUG):
-        for station in stations_in_wroclaw:
+        for station in stations:
             logger.debug("Id: %s Station code: %s City: %s",station.id, station.station_code, station.city, extra={"station_id": 69})
 
         
-    return stations_in_wroclaw
+    return stations
         
 
-def get_gios_sensors(client: httpx.Client, station: GiosStation) -> list[GiosSensor] | None:
+def get_gios_sensors(client: httpx.Client, station: GiosStation) -> list[GiosSensor]:
     gios_sensors :list[GiosSensor] = []
-    response = _get_with_error_handling(client=client, url=GIOS_MEASURING_STATIONS+str(station.id))
+    response = _get_with_error_handling(client=client, url=GIOS_SENSORS+str(station.id))
     if not response :
-        logger.debug("Could not get sensor from URL: %s", GIOS_MEASURING_STATIONS+str(station.id))
-        return None
+        logger.debug("Could not get sensor from URL: %s", GIOS_SENSORS+str(station.id))
+        return gios_sensors
     data = response.json()
     stations = data[GiosSensorFields.MEASURMENT_STATIONS]
     for measurment_station in stations:
@@ -248,12 +279,12 @@ def get_gios_sensors(client: httpx.Client, station: GiosStation) -> list[GiosSen
 
     return gios_sensors
 
-def get_gios_sensor_data(cleint: httpx.Client, sensor: GiosSensor) -> list[GiosSensorReading] | None:
+def get_gios_sensor_data(client: httpx.Client, sensor: GiosSensor) -> list[GiosSensorReading]:
     sensor_readings : list[GiosSensorReading] = []
     response  = _get_with_error_handling(client=client, url=GIOS_SENSOR_DATA+str(sensor.id))
     if not response :
         logger.debug("Could not get sensor data from URL: %s", GIOS_SENSOR_DATA+str(sensor.id))
-        return None
+        return sensor_readings
     data = response.json()
     measurments = data[GiosSensorReadingFields.MEASURMENTS]
     for measurment in measurments:
@@ -285,13 +316,13 @@ def get_gios_station_air_index(client: httpx.Client, station: GiosStation) -> Gi
     return index
     
 
-def get_imgw_stations(client: httpx.Client, url: str, name_field: str,  city: str = "Wrocław") -> list[ImgwStation]:
-    stations_in_wroclaw : list[ImgwStation] =[]
+def get_imgw_stations(client: httpx.Client, url: str, name_field: str,  city: str ) -> list[ImgwStation]:
+    stations : list[ImgwStation] =[]
     
     response = _get_with_error_handling(client=client,url=url)
     if not response :
             logger.debug("Could not get station data from URL: %s", url)
-            return stations_in_wroclaw
+            return stations
         
     page = response.json()
 
@@ -300,22 +331,119 @@ def get_imgw_stations(client: httpx.Client, url: str, name_field: str,  city: st
         city_name = station[name_field].lower()
         if city_name == city.lower():
             imgw_station = ImgwStation.model_validate(station)
-            stations_in_wroclaw.append(imgw_station)
+            stations.append(imgw_station)
             logger.info("Found IMGW station %s in %s", imgw_station.id, imgw_station.station_name)
             
     if logger.isEnabledFor(logging.DEBUG):
-        for station in stations_in_wroclaw:
+        for station in stations:
             logger.debug("Id: %s city: %s ", station.id, station.station_name)
 
-    return stations_in_wroclaw
+    return stations
+
+def get_imgw_synop_data(client: httpx.Client, station: ImgwStation) -> ImgwSynopReading | None:
+    url: str = IMGW_SYNOPTIC_DATA+str(station.id)
+    response = _get_with_error_handling(client=client, url=url)
+    if not response:
+        logger.debug("Could not get station data from URL: %s", url)
+        return None
+    
+    data = response.json()
+    logger.debug("Got data for %s", str(station.id), extra=data)
+    return ImgwSynopReading.model_validate(data)
+
+def get_imgw_meteo_data(client: httpx.Client, station: ImgwStation) -> ImgwMeteoReading | None:
+    url: str = IMGW_METEO_DATA+str(station.id)
+    response = _get_with_error_handling(client=client, url=url)
+    if not response:
+        logger.debug("Could not get station data from URL: %s", url)
+        return None
+        
+    data = response.json()[0]
+    logger.debug("Got data for %s", str(station.id), extra=data)
+    return ImgwMeteoReading.model_validate(data)
+
+def get_gios_data(city: str) -> None:
+    stations : list[GiosStation] = []
+    with httpx.Client(timeout=30) as client:
+        stations = get_gios_stations(city=city, client=client)
+        sensors : list[GiosSensor] = []
+        for station in stations:
+            logger.debug("Fetching data for station %s", str(station.id))
+            sensors = get_gios_sensors(client, station)
+            readings : list[GiosSensorReading] = []
+            sensor_index = 1
+            for sensor in sensors:
+                logger.debug("Fetching data for sesnor %s %s/%s", str(station.id), sensor_index, len(sensors))
+                readings = get_gios_sensor_data(client, sensor)
+                sensor.readings = readings
+                sensor_index += 1
+            station.sensors = sensors
+            
+            logger.debug("Fetching air_index for station %s", str(station.id))
+            air_indexes = get_gios_station_air_index(client, station)
+            station.air_indexes = air_indexes
+            
+    snapshot = GiosSnapshot(fetched_at=datetime.now(UTC), stations=stations)
+    _save_to_json(data=snapshot)
+    print(snapshot.model_dump_json(indent=2))
+            
+
+def get_imgw_data(city: str) -> None:
+    meteo_stations : list[ImgwStation] = []
+    synop_stations : list[ImgwStation] = []
+    with httpx.Client(timeout=30) as client:
+        meteo_stations = get_imgw_stations(client, IMGW_METEO_DATA, ImgwMeteoFields.NAME, city=city)
+        synop_stations = get_imgw_stations(client, IMGW_SYNOPTIC_DATA, ImgwSynopFields.NAME, city=city)
+        
+        logger.debug("Fetching meteo data")
+        meteo_index = 1
+        for meteo_station in meteo_stations:
+            logger.debug("Fetching data for station %s %s/%s", str(meteo_station.id), meteo_index, len(meteo_stations))
+            meteo_reading  = get_imgw_meteo_data(client, meteo_station)
+            meteo_station.reading = meteo_reading 
+            meteo_index += 1
+           
+        logger.debug("Fetching synop data") 
+        synop_index = 1
+        for synop_station in synop_stations:
+            logger.debug("Fetching data for station %s %s/%s", str(synop_station.id), synop_index, len(synop_stations))
+            synop_reading = get_imgw_synop_data(client, synop_station)
+            synop_station.reading = synop_reading
+            synop_index += 1
+                    
+    snapshot = ImgwSnapshot(fetched_at=datetime.now(UTC), meteo_stations=meteo_stations, synop_stations=synop_stations)
+    _save_to_json(data=snapshot)
+    print(snapshot.model_dump_json(indent=2))
+        
+def main():
+    parser = argparse.ArgumentParser(description="Get data from wether or air quality stations and upload them to S3")
+    
+    parser.add_argument("-i", "--imgw", action="store_true", help="get data from IMGW stations")
+    parser.add_argument("-g", "--gios", action="store_true", help="get data from GIOS stations")
+    parser.add_argument("city", nargs="?", default="Wrocław", help="city for which to gather data")
+
+    args = parser.parse_args()
+    
+    if args.imgw:
+        get_imgw_data(args.city)
+        
+    if args.gios:
+        get_gios_data(args.city)
+        
+    if not args.gios and not args.imgw:
+        logger.error("Plese pick at least one of the services, -i or -imgw for IMGW and -g or -gios for GIOS")
+        
+        
+    
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)  
     logger.setLevel(logging.DEBUG) 
-    with httpx.Client(timeout=30) as client:
-        # stations_in_wroclaw = get_gios_stations(client)
-        get_imgw_stations(client, IMGW_SYNOPTIC_DATA, ImgwSynopFields.NAME)
-        get_imgw_stations(client, IMGW_METEO_DATA, ImgwMeteoFields.NAME)
-        # get_gios_sensors(client, stations_in_wroclaw[2])
-        # get_gios_station_air_index(client, stations_in_wroclaw[0])
+    main()
+    # with httpx.Client(timeout=30) as client:
+    #     # stations = get_gios_stations(client)
+    #     get_imgw_stations(client, IMGW_SYNOPTIC_DATA, ImgwSynopFields.NAME)
+    #     get_imgw_stations(client, IMGW_METEO_DATA, ImgwMeteoFields.NAME)
+    #     # get_gios_sensors(client, stations[2])
+    #     # get_gios_station_air_index(client, stations[0])
         
