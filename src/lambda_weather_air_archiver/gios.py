@@ -126,7 +126,7 @@ def _get_gios_redings(client: httpx.Client, station: GiosStation) ->  GiosStatio
             readings = get_gios_sensor_data(client, sensor)
             sensor.readings = readings
         except (KeyError , ValidationError ):
-                logger.exception("Fetching data for sensor %s FAILED", sensor.id)
+                logger.warning("Fetching data for sensor %s FAILED", sensor.id)
     station.sensors = sensors
     
     logger.debug("Fetching air_index for station %s", station.id)
