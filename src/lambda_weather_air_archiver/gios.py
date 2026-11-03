@@ -14,13 +14,13 @@ from lambda_weather_air_archiver.models import (
     GiosAirIndex,
     GiosAirIndexFields,
     GiosFields,
+    GiosMeasuredPollutants,
     GiosSensor,
     GiosSensorFields,
     GiosSensorReading,
     GiosSensorReadingFields,
     GiosSnapshot,
     GiosStation,
-    MeasuredPollutants,
 )
 from lambda_weather_air_archiver.utils import get_with_error_handling, save_to_json
 
@@ -68,7 +68,7 @@ def get_gios_sensors(client: httpx.Client, station: GiosStation) -> list[GiosSen
     data = response.json()
     stations = data[GiosSensorFields.MEASURMENT_STATIONS]
     for measurment_station in stations:
-        for pollutant in MeasuredPollutants:
+        for pollutant in GiosMeasuredPollutants:
             if pollutant in measurment_station[GiosSensorFields.INDICATOR_CODE]:
                 gios_sensors.append(GiosSensor.model_validate(measurment_station))
                 logger.debug("Pollutant: %s matched to %s probe id %s", measurment_station[GiosSensorFields.INDICATOR_CODE], 
@@ -139,6 +139,7 @@ def _get_gios_redings(client: httpx.Client, station: GiosStation) ->  GiosStatio
     return station
 
 def get_gios_data(city: str) -> None:
+    stations: list[GiosStation] = []
     with httpx.Client(timeout=30) as client:
         stations = get_gios_stations(city=city, client=client)
         if not stations:
@@ -151,3 +152,5 @@ def get_gios_data(city: str) -> None:
                 logger.exception("Fetching data for station %s FAILED", station.id)    
     snapshot = GiosSnapshot(fetched_at=datetime.now(UTC), stations=stations)
     save_to_json(data=snapshot)
+    if stations:
+        logger.info("Successfuly saved values form GIOS")

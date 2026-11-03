@@ -98,3 +98,5 @@ def get_imgw_data(city: str) -> None:
                     
     snapshot = ImgwSnapshot(fetched_at=datetime.now(UTC), meteo_stations=meteo_stations, synop_stations=synop_stations)
     save_to_json(data=snapshot)
+    if meteo_stations and synop_stations:
+        logger.info("Successfuly saved values form IMGW")

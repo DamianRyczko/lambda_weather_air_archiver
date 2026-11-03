@@ -14,7 +14,11 @@ from tenacity import (
 )
 
 from lambda_weather_air_archiver.config import RETRYABLE_STATUS, s3
-from lambda_weather_air_archiver.models import GiosSnapshot, ImgwSnapshot
+from lambda_weather_air_archiver.models import (
+    GiosSnapshot,
+    ImgwSnapshot,
+    OpenMeteoSnapshot,
+)
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3ServiceResource
@@ -27,10 +31,10 @@ def _is_retryable(exc: BaseException) -> bool:
     else:
         return isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError))
     
-def save_to_json(data: ImgwSnapshot | GiosSnapshot, s3: S3ServiceResource = s3, bucket_path:str = "weather-air-data-885427126159-eu-north-1-an") -> None :
+def save_to_json(data: ImgwSnapshot | GiosSnapshot | OpenMeteoSnapshot, s3: S3ServiceResource = s3, bucket_path:str = "weather-air-data-885427126159-eu-north-1-an") -> None :
     if data:
         ts = data.fetched_at
-        filepath = f"{data.source}/date={ts:%Y-%m-%d}/{ts:%H-%M-%S}.json"
+        filepath = f"bronze/{data.source}/date={ts:%Y-%m-%d}/{ts:%H-%M-%S}.json"
         try:
             s3.Bucket(bucket_path).put_object(Key=filepath, Body=data.model_dump_json(indent=2))
         except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError) as e:
