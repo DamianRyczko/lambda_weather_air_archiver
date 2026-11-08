@@ -183,6 +183,7 @@ class OpenMeteoForecastVariables(StrEnum):
     WIND_GUSTS = 'wind_gusts_10m'
     SOIL_TEMPERATURE = 'soil_temperature_0_to_7cm'
     CLOUD_COVER = 'cloud_cover'
+    BOUNDARY_LAYER_HEIGHT = 'boundary_layer_height'
 
 class OpenMeteoAirQualityVariables(StrEnum):
     PM_10 = 'pm10'
@@ -215,6 +216,7 @@ class OpenMeteoHourlyForecast(OpenMeteoHourly):
     wind_gusts : list[float | None] = Field(title="Wind gusts 10m", validation_alias=OpenMeteoForecastVariables.WIND_GUSTS)
     soil_temperature : list[float | None] = Field(title="Soil temperature 0-7cm", validation_alias=OpenMeteoForecastVariables.SOIL_TEMPERATURE)
     cloud_cover : list[float | None] = Field(title="Cloud cover total", validation_alias=OpenMeteoForecastVariables.CLOUD_COVER)
+    boundary_layer_height : list[float | None] = Field(title="Boundary layer height", validation_alias=OpenMeteoForecastVariables.BOUNDARY_LAYER_HEIGHT)
 
 
 class OpenMeteoHourlyCurrentWether(OpenMeteoCurrent):
@@ -226,6 +228,7 @@ class OpenMeteoHourlyCurrentWether(OpenMeteoCurrent):
     wind_direction : float | None = Field(title="Wind direction 10m", validation_alias=OpenMeteoForecastVariables.WIND_DIRECTION)
     wind_gusts : float | None = Field(title="Wind gusts 10m", validation_alias=OpenMeteoForecastVariables.WIND_GUSTS)
     cloud_cover : float | None = Field(title="Cloud cover total", validation_alias=OpenMeteoForecastVariables.CLOUD_COVER)
+    boundary_layer_height : float | None = Field(title="Boundary layer height", validation_alias=OpenMeteoForecastVariables.BOUNDARY_LAYER_HEIGHT)
     
 class OpenMeteoHourlyAirQuality(OpenMeteoHourly):
     pm_10 : list[float | None] = Field(title="PM 10", validation_alias=OpenMeteoAirQualityVariables.PM_10)

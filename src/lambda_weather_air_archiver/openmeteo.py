@@ -33,6 +33,7 @@ _METEO_FORECAST = [
     OpenMeteoForecastVariables.WIND_GUSTS,
     OpenMeteoForecastVariables.SOIL_TEMPERATURE,
     OpenMeteoForecastVariables.CLOUD_COVER,
+    OpenMeteoForecastVariables.BOUNDARY_LAYER_HEIGHT,
         ]
 
 _METEO_WEATHER_CURRENT= [
@@ -44,6 +45,7 @@ _METEO_WEATHER_CURRENT= [
     OpenMeteoForecastVariables.WIND_DIRECTION,
     OpenMeteoForecastVariables.WIND_GUSTS,
     OpenMeteoForecastVariables.CLOUD_COVER,
+    OpenMeteoForecastVariables.BOUNDARY_LAYER_HEIGHT,
     ]
 
 _METEO_AIR = [

@@ -59,14 +59,22 @@ def get_gios_stations(city: str, client: httpx.Client, page_size: int = 20) -> l
     return stations
         
 
-def get_gios_sensors(client: httpx.Client, station: GiosStation) -> list[GiosSensor]:
+def get_gios_sensors(client: httpx.Client, station: GiosStation, page_size: int = 100) -> list[GiosSensor]:
     gios_sensors :list[GiosSensor] = []
-    response = get_with_error_handling(client=client, url=GIOS_SENSORS+str(station.id))
-    if not response :
-        logger.debug("Could not get sensor from URL: %s", GIOS_SENSORS+str(station.id))
-        return gios_sensors
-    data = response.json()
-    stations = data[GiosSensorFields.MEASURMENT_STATIONS]
+    stations : list[dict] = []
+    page_nr = 0
+    total_pages = 1  # real value comes from the first response
+
+    while page_nr < total_pages:
+        response = get_with_error_handling(client=client, url=GIOS_SENSORS+str(station.id), params={"page": page_nr, "size": page_size})
+        if not response :
+            logger.debug("Could not get sensor from URL: %s", GIOS_SENSORS+str(station.id))
+            break
+        data = response.json()
+        total_pages = data.get("totalPages", 1)
+        stations.extend(data[GiosSensorFields.MEASURMENT_STATIONS])
+        page_nr += 1
+
     for measurment_station in stations:
         for pollutant in GiosMeasuredPollutants:
             if pollutant in measurment_station[GiosSensorFields.INDICATOR_CODE]:
@@ -78,14 +86,24 @@ def get_gios_sensors(client: httpx.Client, station: GiosStation) -> list[GiosSen
 
     return gios_sensors
 
-def get_gios_sensor_data(client: httpx.Client, sensor: GiosSensor) -> list[GiosSensorReading]:
+def get_gios_sensor_data(client: httpx.Client, sensor: GiosSensor, page_size: int = 100) -> list[GiosSensorReading]:
     sensor_readings : list[GiosSensorReading] = []
-    response  = get_with_error_handling(client=client, url=GIOS_SENSOR_DATA+str(sensor.id))
-    if not response :
-        logger.debug("Could not get sensor data from URL: %s", GIOS_SENSOR_DATA+str(sensor.id))
+    measurments : list[dict] = []
+    page_nr = 0
+    total_pages = 1  # real value comes from the first response
+
+    while page_nr < total_pages:
+        response  = get_with_error_handling(client=client, url=GIOS_SENSOR_DATA+str(sensor.id), params={"page": page_nr, "size": page_size})
+        if not response :
+            logger.debug("Could not get sensor data from URL: %s", GIOS_SENSOR_DATA+str(sensor.id))
+            break
+        data = response.json()
+        total_pages = data.get("totalPages", 1)
+        measurments.extend(data[GiosSensorReadingFields.MEASURMENTS])
+        page_nr += 1
+
+    if page_nr == 0:  
         return sensor_readings
-    data = response.json()
-    measurments = data[GiosSensorReadingFields.MEASURMENTS]
     for measurment in measurments:
         sensor_readings.append(GiosSensorReading.model_validate(measurment))
         
